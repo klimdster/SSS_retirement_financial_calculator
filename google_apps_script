@@ -1,0 +1,143 @@
+//Google Apps Script
+
+// You can compute the internal rate of return (IRR) in Google Apps Script using an iterative numerical method like Newton-Raphson, since there is no built-in IRR() function in Apps Script like there is in Google Sheets.
+// Below is a working Google Apps Script function that:
+// Takes initial amount A,
+// Recurring yearly investment M,
+// Number of years N,
+// Final target amount X,
+// Returns the estimated annual return rate R.
+
+
+function calculateIRRFromAandM(A, M, N, X) {
+  const maxIterations = 1000;
+  const tolerance = 1e-7;
+  let rate = 0.1; // Initial guess: 10%
+
+  function npv(rate) {
+    let value = -A;
+    for (let t = 1; t <= N; t++) {
+      if (t === N) {
+        value += (X - M) / Math.pow(1 + rate, t); // Final year includes final value
+      } else {
+        value += -M / Math.pow(1 + rate, t);
+      }
+    }
+    return value;
+  }
+
+  function npv_derivative(rate) {
+    let derivative = 0;
+    for (let t = 1; t <= N; t++) {
+      if (t === N) {
+        derivative += -(X - M) * t / Math.pow(1 + rate, t + 1);
+      } else {
+        derivative += M * t / Math.pow(1 + rate, t + 1);
+      }
+    }
+    return derivative;
+  }
+
+  for (let i = 0; i < maxIterations; i++) {
+    const value = npv(rate);
+    const derivative = npv_derivative(rate);
+
+    if (Math.abs(derivative) < 1e-10) break;
+
+    const newRate = rate - value / derivative;
+
+    if (!isFinite(newRate) || newRate < -0.99 || newRate > 10) {
+      return "Rate overflow or invalid input";
+    }
+
+    if (Math.abs(newRate - rate) < tolerance) {
+      return (newRate * 100).toFixed(4) + "%"; // Return as string
+    }
+
+    rate = newRate;
+  }
+
+  return "IRR not found";
+}
+
+//can be imported to googlesheet as an add-on function
+function IRRFROMCASHFLOW(A, M, N, X) {
+  return calculateIRRFromAandM(A, M, N, X);
+}
+
+
+
+
+function onFormSubmit(e) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Form Responses 1");
+  const lastRow = sheet.getLastRow();
+  const row = sheet.getRange(lastRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  const name = row[1];
+  const email = row[2];
+  const currentAge = row[3];
+  const retirementAge = row[4];
+  const monthlyIncomeGoal = row[5];
+  const inflationRate = row[6];
+  const investmentReturn = row[7];
+  const currentSavings = row[8];
+  const monthlyContribution = row[9];
+
+  const yearsToRetirement = retirementAge - currentAge;
+
+  // Step 1: Adjust monthly income for inflation
+  const futureMonthlyIncome = monthlyIncomeGoal * Math.pow(1 + inflationRate/100, yearsToRetirement);
+
+  // Step 2: Estimate retirement fund needed - rule of 25x
+  const futureFundNeeded = futureMonthlyIncome * 12 * 25;
+
+  // Step 3: What is the normal recommended portfolio allocation based on age, using rule of 110
+  const portfolioGrowthPc = 110 - currentAge  
+
+
+  // Step 4: Calculate IRR needed
+  const CS = currentSavings;     // Initial investment
+  const MC = monthlyContribution *12;     // Yearly investment
+  const NR = yearsToRetirement;        // Number of years
+  const FF = futureFundNeeded;    // Final value
+  const resultIRR = calculateIRRFromAandM(CS, MC, NR, FF);
+  Logger.log("Estimated IRR: " + resultIRR)
+
+  // Write results to the sheet
+  sheet.getRange(lastRow, 11).setValue(futureMonthlyIncome.toFixed(2)); // Column K - Adjusted income
+  sheet.getRange(lastRow, 12).setValue(futureFundNeeded.toFixed(2));    // Column L - Needed fund
+  sheet.getRange(lastRow, 13).setValue(portfolioGrowthPc.toFixed(2));   // Column M - Normal Growth Portfolio By Current Age
+  sheet.getRange(lastRow, 14).setValue(resultIRR);           // Column N - resultIRR
+
+
+  // Optional: Email the results
+  const subject = `Retirement Planning Report for ${email}`;
+  const body = `
+    Hi ${name},
+
+    Here is your retirement planning result:
+
+    📅 Years to Retirement: ${yearsToRetirement}
+    💰 Monthly Income Goal (present_value): RM${monthlyIncomeGoal.toFixed(2)}
+    💰 Monthly Income Goal (future_value): RM${futureMonthlyIncome.toFixed(2)}
+    🏦 Retirement Fund Needed (future_value): RM${futureFundNeeded.toFixed(2)}
+    💰 Based on your total current savings: RM${currentSavings.toFixed(2)}
+    💰 Based on your planned monthly additional savings: RM${monthlyContribution.toFixed(2)}
+    💰 Based on your assumed annual inflation rate in percent: ${inflationRate}
+    📈 Based on your age, normal percentage of your investment should allocation to growth: ${portfolioGrowthPc.toFixed(2)}
+    ❗ You need to look for investment with yearly return in percent: ${resultIRR}
+    ❗ vs your current annual investment return in percent: ${investmentReturn}
+
+    You can adjust your monthly savings or retirement age or lower your monthly income goal in case there is a gap.
+
+    Regards,
+    KM-Wise Retirement Planner Bot v202507160035`;
+
+  MailApp.sendEmail(email, subject, body);
+  
+
+
+
+
+}
+
